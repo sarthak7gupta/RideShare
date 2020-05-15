@@ -1,0 +1,24 @@
+version: '3'
+
+services:
+  rides:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: rides
+    image: rides:latest
+    ports:
+      - "80:5000"
+    expose:
+      - "5000"
+    environment:
+      TEAM_NAME: CC_0077_0186_0281
+    depends_on:
+      - mongorides
+
+  mongorides:
+    image: mongo
+    container_name: mongorides
+    command: mongod
+    expose:
+      - "27017"

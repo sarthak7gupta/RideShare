@@ -1,0 +1,24 @@
+version: '3'
+
+services:
+  users:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: users
+    image: users:latest
+    ports:
+      - "80:5000"
+    expose:
+      - "5000"
+    environment:
+      TEAM_NAME: CC_0077_0186_0281
+    depends_on:
+      - mongousers
+
+  mongousers:
+    image: mongo
+    container_name: mongousers
+    command: mongod
+    expose:
+      - "27017"

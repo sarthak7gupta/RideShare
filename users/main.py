@@ -8,13 +8,13 @@ from flask_restful import Api, Resource, reqparse
 
 from config import flask_ips as ips
 from config import flask_ports as ports
-from database import users_collection
+from database import counters_collection, users_collection
 
 url_prefix = "/api/v1"
-port_users = ports.docker.users
-port_rides = ports.docker.rides
-ip_users = ips.docker.users
-ip_rides = ips.extern.rides
+port_users = ports.docker
+port_rides = ports.extern
+ip_users = ips.docker
+ip_rides = ips.extern
 base_url_users = f"http://{ip_users}:{port_users}{url_prefix}"
 base_url_rides = f"http://{ip_rides}:{port_rides}{url_prefix}"
 
@@ -44,9 +44,30 @@ def is_valid_sha(password: str):
 	return len(password) == 40 and not set(password.lower()) - hex_set
 
 
+class RequestsDB(Resource):
+	def get(self):
+		try:
+			a = list(counters_collection.find({"_id": "requests"}))
+			return [a[0]["req_count"] if a else 0], 200
+
+		except Exception as e:
+			logger.error(f"DBWrite error. Error: {e}")
+			return [], 400
+
+	def delete(self):
+		try:
+			counters_collection.find_one_and_update(
+				{"_id": "requests"}, {"$set": {"req_count": 0}}, upsert=True
+			)
+			return {}, 200
+
+		except Exception as e:
+			logger.error(f"DBWrite error. Error: {e}")
+			return {}, 400
+
+
 class DBWrite(Resource):
 	def post(self):
-		logger.info(f"{request.method} {request.base_url} {request.data}")
 		try:
 			args = parser.parse_args()
 			action = args["action"]
@@ -70,7 +91,6 @@ class DBWrite(Resource):
 
 class DBRead(Resource):
 	def post(self):
-		logger.info(f"{request.method} {request.base_url} {request.data}")
 		try:
 			args = parser.parse_args()
 			filte = args["filter"]
@@ -86,7 +106,6 @@ class DBRead(Resource):
 
 class DBClear(Resource):
 	def post(self):
-		logger.info(f"{request.method} {request.base_url} {request.data}")
 		try:
 			users_collection.delete_many({})
 
@@ -129,7 +148,7 @@ def delete_rides(filte: dict):
 
 class Users(Resource):
 	def put(self):
-		logger.info(f"{request.method} {request.base_url} {request.data}")
+		logger.info(request.get_json())
 		args = parser.parse_args()
 		username, password = args["username"], args["password"]
 
@@ -152,7 +171,6 @@ class Users(Resource):
 
 class User(Resource):
 	def delete(self, username):
-		logger.info(f"{request.method} {request.base_url} {request.data}")
 
 		query = {"username": username}
 		if not find_users(query):
@@ -174,6 +192,7 @@ api.add_resource(User, f"{url_prefix}/users/<string:username>")
 api.add_resource(DBWrite, f"{url_prefix}/db/write")
 api.add_resource(DBRead, f"{url_prefix}/db/read")
 api.add_resource(DBClear, f"{url_prefix}/db/clear")
+api.add_resource(RequestsDB, f"{url_prefix}/_count")
 
 
 if __name__ == "__main__":

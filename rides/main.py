@@ -13,10 +13,10 @@ from database import counters_collection, rides_collection
 from locations import locations
 
 url_prefix = "/api/v1"
-port_rides = ports.docker.rides
-port_users = ports.docker.users
-ip_rides = ips.docker.rides
-ip_users = ips.extern.users
+port_rides = ports.docker
+port_users = ports.extern
+ip_rides = ips.docker
+ip_users = ips.extern
 base_url_rides = f"http://{ip_rides}:{port_rides}{url_prefix}"
 base_url_users = f"http://{ip_users}:{port_users}{url_prefix}"
 
@@ -44,9 +44,30 @@ parser.add_argument("source", type=int)
 parser.add_argument("destination", type=int)
 
 
+class RequestsDB(Resource):
+	def get(self):
+		try:
+			a = list(counters_collection.find({"_id": "requests"}))
+			return [a[0]["req_count"] if a else 0], 200
+
+		except Exception as e:
+			logger.error(f"DBWrite error. Error: {e}")
+			return [], 400
+
+	def delete(self):
+		try:
+			counters_collection.find_one_and_update(
+				{"_id": "requests"}, {"$set": {"req_count": 0}}, upsert=True
+			)
+			return {}, 200
+
+		except Exception as e:
+			logger.error(f"DBWrite error. Error: {e}")
+			return {}, 400
+
+
 class DBWrite(Resource):
 	def post(self):
-		logger.info(f"{request.method} {request.base_url} {request.data}")
 		try:
 			args = parser.parse_args()
 			action = args["action"]
@@ -61,16 +82,10 @@ class DBWrite(Resource):
 			elif action == 2:
 				rides_collection.delete_many(filte)
 			elif action == 3:
-				return (
-					{
-						"id": counters_collection.find_one_and_update(
-							{"_id": "rideid"},
-							{"$inc": {"sequence_value": 1}},
-							upsert=True,
-						)["sequence_value"]
-					},
-					201,
+				a = counters_collection.find_one_and_update(
+					{"_id": "rideid"}, {"$inc": {"sequence_value": 1}}, upsert=True
 				)
+				return {"id": a["sequence_value"] + 1 if a else 1}, 201
 
 			else:
 				return {}, 400
@@ -84,7 +99,6 @@ class DBWrite(Resource):
 
 class DBRead(Resource):
 	def post(self):
-		logger.info(f"{request.method} {request.base_url} {request.data}")
 		try:
 			args = parser.parse_args()
 			filte = args["filter"]
@@ -100,7 +114,6 @@ class DBRead(Resource):
 
 class DBClear(Resource):
 	def post(self):
-		logger.info(f"{request.method} {request.base_url} {request.data}")
 		try:
 			rides_collection.delete_many({})
 
@@ -137,7 +150,9 @@ def delete_rides(filte: dict):
 
 def find_users() -> List[str]:
 	url = f"{base_url_users}/users"
-	return requests.get(url, headers=headers).json()
+	headers.update({"Origin": "3.232.243.208"})
+	a = requests.get(url, headers=headers)
+	return a.json() if a.status_code != 204 else []
 
 
 def next_id():
@@ -148,7 +163,7 @@ def next_id():
 
 class Rides(Resource):
 	def post(self):
-		logger.info(f"{request.method} {request.base_url} {request.data}")
+		logger.info(request.get_json())
 		args = parser.parse_args()
 		created_by = args["created_by"]
 		timestamp = args["timestamp"]
@@ -187,7 +202,6 @@ class Rides(Resource):
 		return {}, 201
 
 	def get(self):
-		logger.info(f"{request.method} {request.base_url} {request.data}")
 		args = request.args
 		source = int(args["source"])
 		destination = int(args["destination"])
@@ -213,9 +227,13 @@ class Rides(Resource):
 		return r, 200
 
 
+class RideCount(Resource):
+	def get(self):
+		return [len(find_rides({}))], 200
+
+
 class Ride(Resource):
 	def get(self, rideid):
-		logger.info(f"{request.method} {request.base_url} {request.data}")
 		query = {"rideId": rideid}
 		r = find_rides(query)
 
@@ -234,7 +252,7 @@ class Ride(Resource):
 		return r[0], 200
 
 	def post(self, rideid):
-		logger.info(f"{request.method} {request.base_url} {request.data}")
+		logger.info(request.get_json())
 		args = parser.parse_args()
 		username = args["username"]
 
@@ -252,7 +270,6 @@ class Ride(Resource):
 		return {}, 200
 
 	def delete(self, rideid):
-		logger.info(f"{request.method} {request.base_url} {request.data}")
 		query = {"rideId": rideid}
 
 		if not find_rides(query):
@@ -265,9 +282,11 @@ class Ride(Resource):
 
 api.add_resource(Rides, f"{url_prefix}/rides")
 api.add_resource(Ride, f"{url_prefix}/rides/<int:rideid>")
+api.add_resource(RideCount, f"{url_prefix}/rides/count")
 api.add_resource(DBWrite, f"{url_prefix}/db/write")
 api.add_resource(DBRead, f"{url_prefix}/db/read")
 api.add_resource(DBClear, f"{url_prefix}/db/clear")
+api.add_resource(RequestsDB, f"{url_prefix}/_count")
 
 
 if __name__ == "__main__":
