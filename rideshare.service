@@ -1,0 +1,10 @@
+[Unit]
+Description=Ride Share CC Assignment
+After=network.target
+
+[Service]
+WorkingDirectory=/home/ubuntu/RideShare
+ExecStart=/home/ubuntu/RideShare/venv/bin/python /home/ubuntu/RideShare/venv/bin/gunicorn wsgi:app -c gunicorn.config.py
+
+[Install]
+WantedBy=multi-user.target

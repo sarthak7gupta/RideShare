@@ -1,0 +1,77 @@
+---
+test_name: List all upcoming rides for a given source and destination
+
+stages:
+  - name: Add user to create ride
+    request:
+      url: http://localhost:80/api/v1/users
+      method: PUT
+      json:
+        username: "test0"
+        password: "1234567890123456789012345678901234567890"
+    response:
+      status_code: 201
+
+  - name: Create a ride
+    request:
+      url: http://localhost:80/api/v1/rides
+      method: POST
+      json:
+        created_by: "test0"
+        timestamp: "18-07-2020:00-24-10"
+        source: "174"
+        destination: "175"
+    response:
+      status_code: 201
+
+  - name: Create another ride
+    request:
+      url: http://localhost:80/api/v1/rides
+      method: POST
+      json:
+        created_by: "test0"
+        timestamp: "18-07-2019:00-24-10"
+        source: "174"
+        destination: "175"
+    response:
+      status_code: 201
+
+  - name: Locations are ok, rides exist
+    request:
+      url: http://localhost:80/api/v1/rides
+      method: GET
+      params:
+        source: "174"
+        destination: "175"
+    response:
+      status_code: 200
+
+  - name: Locations are ok, no rides
+    request:
+      url: http://localhost:80/api/v1/rides
+      method: GET
+      params:
+        source: "14"
+        destination: "15"
+    response:
+      status_code: 204
+
+  - name: Locations are invalid
+    request:
+      url: http://localhost:80/api/v1/rides
+      method: GET
+      params:
+        source: "14"
+        destination: "1500"
+    response:
+      status_code: 400
+
+  - name: Wrong Method
+    request:
+      url: http://localhost:80/api/v1/rides
+      method: PUT
+      params:
+        source: "174"
+        destination: "175"
+    response:
+      status_code: 405

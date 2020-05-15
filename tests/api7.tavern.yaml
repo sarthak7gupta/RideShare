@@ -1,0 +1,46 @@
+---
+test_name: Delete ride
+
+stages:
+  - name: Add user to create ride
+    request:
+      url: http://localhost:80/api/v1/users
+      method: PUT
+      json:
+        username: "test0"
+        password: "1234567890123456789012345678901234567890"
+    response:
+      status_code: 201
+
+  - name: Create a ride
+    request:
+      url: http://localhost:80/api/v1/rides
+      method: POST
+      json:
+        created_by: "test0"
+        timestamp: "18-07-2020:00-24-10"
+        source: "174"
+        destination: "175"
+    response:
+      status_code: 201
+
+  - name: Ride id is valid
+    request:
+      url: http://localhost:80/api/v1/rides/1
+      method: DELETE
+    response:
+      status_code: 200
+
+  - name: Ride id is invalid
+    request:
+      url: http://localhost:80/api/v1/rides/1
+      method: DELETE
+    response:
+      status_code: 400
+
+  - name: Wrong Method
+    request:
+      url: http://localhost:80/api/v1/rides/1
+      method: PUT
+    response:
+      status_code: 405
