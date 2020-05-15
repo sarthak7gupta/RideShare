@@ -7,21 +7,20 @@ import requests
 from flask import Flask, request
 from flask_restful import Api, Resource, reqparse
 
-from database import db
+from config import flask_ips as ips
+from config import flask_ports as ports
+from database import counters_collection, rides_collection
 from locations import locations
-from password import isValidSHA
 
-# from functools import partial
-# from bson import json_util
-# from termcolor import colored
-
-port = 5000
 url_prefix = "/api/v1"
-ip_addr = "localhost"
-base_url = f"http://{ip_addr}:{port}{url_prefix}"
+port_rides = ports.docker.rides
+port_users = ports.docker.users
+ip_rides = ips.docker.rides
+ip_users = ips.extern.users
+base_url_rides = f"http://{ip_rides}:{port_rides}{url_prefix}"
+base_url_users = f"http://{ip_users}:{port_users}{url_prefix}"
 
-# dumps = partial(dumps, default=str)
-# dumps = partial(dumps, default=json_util.default)
+headers = {"Content-Type": "application/json"}
 
 logging.basicConfig(
 	level=logging.INFO,
@@ -35,12 +34,10 @@ api = Api(app)
 
 parser = reqparse.RequestParser()
 parser.add_argument("action", type=int)
-parser.add_argument("collection", type=str)
 parser.add_argument("document", type=dict)
 parser.add_argument("filter", type=dict)
 parser.add_argument("update", type=dict)
 parser.add_argument("username", type=str)
-parser.add_argument("password", type=str)
 parser.add_argument("created_by", type=str)
 parser.add_argument("timestamp", type=str)
 parser.add_argument("source", type=int)
@@ -53,21 +50,20 @@ class DBWrite(Resource):
 		try:
 			args = parser.parse_args()
 			action = args["action"]
-			collection = args["collection"]
 			document = args["document"]
 			filte = args["filter"]
 			update = args["update"]
 
 			if action == 0:
-				db[collection].insert_one(document)
+				rides_collection.insert_one(document)
 			elif action == 1:
-				db[collection].update_many(filte, update)
+				rides_collection.update_many(filte, update)
 			elif action == 2:
-				db[collection].delete_many(filte)
+				rides_collection.delete_many(filte)
 			elif action == 3:
 				return (
 					{
-						"id": db["counters"].find_one_and_update(
+						"id": counters_collection.find_one_and_update(
 							{"_id": "rideid"},
 							{"$inc": {"sequence_value": 1}},
 							upsert=True,
@@ -91,10 +87,9 @@ class DBRead(Resource):
 		logger.info(f"{request.method} {request.base_url} {request.data}")
 		try:
 			args = parser.parse_args()
-			collection = args["collection"]
 			filte = args["filter"]
 
-			r = list(db[collection].find(filte, {"_id": 0}))
+			r = list(rides_collection.find(filte, {"_id": 0}))
 
 		except Exception as e:
 			logger.error(f"DBRead error. args: {args}. Error: {e}")
@@ -103,76 +98,52 @@ class DBRead(Resource):
 		return r, 200
 
 
-def insert(collection: str, document: dict):
-	url = f"{base_url}/write"
-	payload = {"action": 0, "collection": collection, "document": document}
-	headers = {"Content-Type": "application/json"}
+class DBClear(Resource):
+	def post(self):
+		logger.info(f"{request.method} {request.base_url} {request.data}")
+		try:
+			rides_collection.delete_many({})
+
+		except Exception as e:
+			logger.error(f"DBClear error. Error: {e}")
+			return {}, 400
+
+		return {}, 200
+
+
+def insert_ride(document: dict):
+	url = f"{base_url_rides}/db/write"
+	payload = {"action": 0, "document": document}
 	return requests.post(url, data=dumps(payload), headers=headers).ok
 
 
-def find(collection: str, filte: dict) -> List[dict]:
-	url = f"{base_url}/read"
-	payload = {"collection": collection, "filter": filte}
-	headers = {"Content-Type": "application/json"}
+def find_rides(filte: dict) -> List[dict]:
+	url = f"{base_url_rides}/db/read"
+	payload = {"filter": filte}
 	return requests.post(url, data=dumps(payload), headers=headers).json()
 
 
-def update(collection: str, filte: dict, update: dict):
-	url = f"{base_url}/write"
-	payload = {"action": 1, "collection": collection, "filter": filte, "update": update}
-	headers = {"Content-Type": "application/json"}
+def update_rides(filte: dict, update: dict):
+	url = f"{base_url_rides}/db/write"
+	payload = {"action": 1, "filter": filte, "update": update}
 	return requests.post(url, data=dumps(payload), headers=headers).ok
 
 
-def delete(collection: str, filte: dict):
-	url = f"{base_url}/write"
-	payload = {"action": 2, "collection": collection, "filter": filte}
-	headers = {"Content-Type": "application/json"}
+def delete_rides(filte: dict):
+	url = f"{base_url_rides}/db/write"
+	payload = {"action": 2, "filter": filte}
 	return requests.post(url, data=dumps(payload), headers=headers).ok
+
+
+def find_users() -> List[str]:
+	url = f"{base_url_users}/users"
+	return requests.get(url, headers=headers).json()
 
 
 def next_id():
-	url = f"{base_url}/write"
+	url = f"{base_url_rides}/db/write"
 	payload = {"action": 3}
-	headers = {"Content-Type": "application/json"}
 	return requests.post(url, data=dumps(payload), headers=headers).json()["id"]
-
-
-class Users(Resource):
-	def put(self):
-		logger.info(f"{request.method} {request.base_url} {request.data}")
-		args = parser.parse_args()
-		username, password = args["username"], args["password"]
-
-		if not isValidSHA(password):
-			return {}, 400
-
-		query = {"username": username}
-		if find("users", query):
-			return {}, 400
-
-		insert("users", {"username": username, "password": password})
-
-		return {}, 201
-
-
-class User(Resource):
-	def delete(self, username):
-		logger.info(f"{request.method} {request.base_url} {request.data}")
-
-		query = {"username": username}
-		if not find("users", query):
-			return {}, 400
-
-		delete("users", query)
-
-		query = {"created_by": username}
-		delete("rides", query)
-
-		query = {"users": username}
-		update("rides", query, {"$pull": query})
-
-		return {}, 200
 
 
 class Rides(Resource):
@@ -184,8 +155,7 @@ class Rides(Resource):
 		source = args["source"]
 		destination = args["destination"]
 
-		query = {"username": created_by}
-		if not find("users", query) \
+		if created_by not in find_users() \
 			or source not in locations \
 			or destination not in locations \
 			or source == destination:
@@ -203,8 +173,7 @@ class Rides(Resource):
 		if timestamp < int(datetime.now().timestamp()):
 			return {}, 400
 
-		insert(
-			"rides",
+		insert_ride(
 			{
 				"rideId": id_,
 				"created_by": created_by,
@@ -212,7 +181,7 @@ class Rides(Resource):
 				"users": [],
 				"source": source,
 				"destination": destination,
-			},
+			}
 		)
 
 		return {}, 201
@@ -231,7 +200,7 @@ class Rides(Resource):
 			"destination": destination,
 			"timestamp": {"$gt": int(datetime.now().timestamp())},
 		}
-		r = find("rides", query)
+		r = find_rides(query)
 
 		if not r:
 			return [], 204
@@ -248,12 +217,17 @@ class Ride(Resource):
 	def get(self, rideid):
 		logger.info(f"{request.method} {request.base_url} {request.data}")
 		query = {"rideId": rideid}
-		r = find("rides", query)
+		r = find_rides(query)
 
 		if not r:
 			return {}, 400
 
-		r[0]["timestamp"] = datetime.fromtimestamp(r[0]["timestamp"]).strftime(
+		timestamp = r[0]["timestamp"]
+
+		if timestamp < int(datetime.now().timestamp()):
+			return {}, 400
+
+		r[0]["timestamp"] = datetime.fromtimestamp(timestamp).strftime(
 			"%d-%m-%Y:%S-%M-%H"
 		)
 
@@ -264,15 +238,16 @@ class Ride(Resource):
 		args = parser.parse_args()
 		username = args["username"]
 
-		r = find("rides", {"rideId": rideid})
+		query = {"rideId": rideid}
+		r = find_rides(query)
 
-		if not find("users", {"username": username}) \
+		if username not in find_users() \
 			or not r \
 			or r[0]["created_by"] == username \
 			or username in r[0]["users"]:
 			return {}, 400
 
-		update("rides", {"rideId": rideid}, {"$push": {"users": username}})
+		update_rides({"rideId": rideid}, {"$push": {"users": username}})
 
 		return {}, 200
 
@@ -280,21 +255,20 @@ class Ride(Resource):
 		logger.info(f"{request.method} {request.base_url} {request.data}")
 		query = {"rideId": rideid}
 
-		if not find("rides", query):
+		if not find_rides(query):
 			return {}, 400
 
-		delete("rides", query)
+		delete_rides(query)
 
 		return {}, 200
 
 
-api.add_resource(Users, f"{url_prefix}/users")
-api.add_resource(User, f"{url_prefix}/users/<string:username>")
 api.add_resource(Rides, f"{url_prefix}/rides")
 api.add_resource(Ride, f"{url_prefix}/rides/<int:rideid>")
-api.add_resource(DBWrite, f"{url_prefix}/write")
-api.add_resource(DBRead, f"{url_prefix}/read")
+api.add_resource(DBWrite, f"{url_prefix}/db/write")
+api.add_resource(DBRead, f"{url_prefix}/db/read")
+api.add_resource(DBClear, f"{url_prefix}/db/clear")
 
 
 if __name__ == "__main__":
-	app.run(port=port, threaded=True, debug=True)
+	app.run(port=port_rides, host="0.0.0.0", debug=True)
