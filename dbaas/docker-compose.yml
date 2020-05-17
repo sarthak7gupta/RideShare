@@ -1,0 +1,63 @@
+# sudo docker-compose down && sudo docker-compose up --build
+version: '3'
+
+services:
+  rabbitmq:
+    image: rabbitmq
+    hostname: rabbitmq
+    expose:
+      - 5672
+    ports:
+      - '5672:5672'
+    restart: on-failure
+
+  redis:
+    image: redis
+    hostname: redis
+    expose:
+      - 6379
+    ports:
+      - '6379:6379'
+    restart: on-failure
+
+  orchestrator:
+    build:
+      context: orchestrator
+      dockerfile: Dockerfile
+    image: orchestrator
+    ports:
+      - '80:5000'
+    depends_on:
+      - rabbitmq
+      - redis
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /usr/bin/docker:/usr/bin/docker
+    restart: on-failure
+
+  worker-master:
+    build:
+      context: worker-master
+      dockerfile: Dockerfile
+    image: worker-master
+    expose:
+      - 27017
+    container_name: worker-master
+    hostname: worker-master
+    depends_on:
+      - rabbitmq
+    restart: on-failure
+
+  worker-slave:
+    build:
+      context: worker-slave
+      dockerfile: Dockerfile
+    image: worker-slave
+    expose:
+      - 27017
+    container_name: worker-slave-1
+    hostname: worker-slave-1
+    depends_on:
+      - rabbitmq
+      - worker-master
+    restart: on-failure

@@ -1,6 +1,15 @@
 version: '3'
 
 services:
+  redis:
+    image: redis
+    restart: on-failure
+    hostname: redis
+    expose:
+      - 6379
+    ports:
+      - '6379:6379'
+
   rides:
     build:
       context: .
@@ -11,14 +20,7 @@ services:
       - "80:5000"
     expose:
       - "5000"
+    depends_on:
+      - redis
     environment:
       TEAM_NAME: CC_0077_0186_0281
-    depends_on:
-      - mongorides
-
-  mongorides:
-    image: mongo
-    container_name: mongorides
-    command: mongod
-    expose:
-      - "27017"

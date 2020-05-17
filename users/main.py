@@ -1,27 +1,32 @@
+"""
+	RideShare (Cloud Computing Project)
+	main.py: python file containing the user API logic
+"""
+
 import logging
 from json import dumps
 from typing import List
 
+import redis
 import requests
 from flask import Flask, request
 from flask_restful import Api, Resource, reqparse
 
-from config import flask_ips as ips
-from config import flask_ports as ports
-from database import counters_collection, users_collection
+from config import dbaas_ip, flask_port, redis_host, redis_key
 
+# Paths for API endpoints
 url_prefix = "/api/v1"
-port_users = ports.docker
-port_rides = ports.extern
-ip_users = ips.docker
-ip_rides = ips.extern
-base_url_users = f"http://{ip_users}:{port_users}{url_prefix}"
-base_url_rides = f"http://{ip_rides}:{port_rides}{url_prefix}"
+base_url_db = f"http://{dbaas_ip}{url_prefix}/db"
+url_db_write = f"{base_url_db}/write"
+url_db_read = f"{base_url_db}/read"
 
+# Standard headers to be sent with every DB request
 headers = {"Content-Type": "application/json"}
 
+# SHA1 charset
 hex_set = set("0123456789abcdef")
 
+# Logger
 logging.basicConfig(
 	level=logging.INFO,
 	format="%(asctime)s %(levelname)-8s %(message)s",
@@ -32,129 +37,145 @@ logger = logging.getLogger()
 app = Flask(__name__)
 api = Api(app)
 
+# fetching the JSON body arguments for a request
 parser = reqparse.RequestParser()
-parser.add_argument("action", type=int)
-parser.add_argument("document", type=dict)
-parser.add_argument("filter", type=dict)
 parser.add_argument("username", type=str)
 parser.add_argument("password", type=str)
 
+# Connecting to redis
+r = redis.Redis(host=redis_host)
 
-def is_valid_sha(password: str):
+
+def is_valid_sha(password: str) -> bool:
+	"""
+	Return is `password` is a valid SHA1 string /[a-f0-9]{40}/
+	"""
 	return len(password) == 40 and not set(password.lower()) - hex_set
 
 
-class RequestsDB(Resource):
-	def get(self):
-		try:
-			a = list(counters_collection.find({"_id": "requests"}))
-			return [a[0]["req_count"] if a else 0], 200
-
-		except Exception as e:
-			logger.error(f"DBWrite error. Error: {e}")
-			return [], 400
-
-	def delete(self):
-		try:
-			counters_collection.find_one_and_update(
-				{"_id": "requests"}, {"$set": {"req_count": 0}}, upsert=True
-			)
-			return {}, 200
-
-		except Exception as e:
-			logger.error(f"DBWrite error. Error: {e}")
-			return {}, 400
-
-
-class DBWrite(Resource):
-	def post(self):
-		try:
-			args = parser.parse_args()
-			action = args["action"]
-			document = args["document"]
-			filte = args["filter"]
-
-			if action == 0:
-				users_collection.insert_one(document)
-			elif action == 2:
-				users_collection.delete_many(filte)
-
-			else:
-				return {}, 400
-
-		except Exception as e:
-			logger.error(f"DBWrite error. args: {args}. Error: {e}")
-			return {}, 400
-
-		return {}, 201
-
-
-class DBRead(Resource):
-	def post(self):
-		try:
-			args = parser.parse_args()
-			filte = args["filter"]
-
-			r = list(users_collection.find(filte, {"_id": 0}))
-
-		except Exception as e:
-			logger.error(f"DBRead error. args: {args}. Error: {e}")
-			return [], 400
-
-		return r, 200
-
-
-class DBClear(Resource):
-	def post(self):
-		try:
-			users_collection.delete_many({})
-
-		except Exception as e:
-			logger.error(f"DBClear error. Error: {e}")
-			return {}, 400
-
-		return {}, 200
-
-
-def insert_user(document: dict):
-	url = f"{base_url_users}/db/write"
-	payload = {"action": 0, "document": document}
-	return requests.post(url, data=dumps(payload), headers=headers).ok
+def insert_user(user: dict) -> bool:
+	"""
+	Helper function to send request to DB to insert `user`
+	Returns if request succeeded or failed
+	"""
+	payload = {"collection": "users", "action": 0, "document": user}
+	res = requests.post(url_db_write, data=dumps(payload), headers=headers).ok
+	logger.info(f"DB insert_user {user} -> {res}")
+	return res
 
 
 def find_users(filte: dict) -> List[dict]:
-	url = f"{base_url_users}/db/read"
-	payload = {"filter": filte}
-	return requests.post(url, data=dumps(payload), headers=headers).json()
+	"""
+	Helper function to send request to DB to find user(s) on query `filte`
+	Returns list of ride documents from DB
+	"""
+	payload = {"collection": "users", "filte": filte}
+	res = requests.post(url_db_read, data=dumps(payload), headers=headers).json()
+	logger.info(f"DB find_users {filte} -> {res}")
+	return res
 
 
-def update_rides(filte: dict, update: dict):
-	url = f"{base_url_rides}/db/write"
-	payload = {"action": 1, "filter": filte, "update": update}
-	return requests.post(url, data=dumps(payload), headers=headers).ok
+def update_rides(filte: dict, update: dict) -> bool:
+	"""
+	Helper function to send request to DB to update ride(s) on query `filte`
+	Returns if request succeeded or failed
+	"""
+	payload = {"collection": "rides", "action": 1, "filte": filte, "update": update}
+	res = requests.post(url_db_write, data=dumps(payload), headers=headers).ok
+	logger.info(f"DB update_rides {filte} {update} -> {res}")
+	return res
 
 
-def delete_users(filte: dict):
-	url = f"{base_url_users}/db/write"
-	payload = {"action": 2, "filter": filte}
-	return requests.post(url, data=dumps(payload), headers=headers).ok
+def delete_users(filte: dict) -> bool:
+	"""
+	Helper function to send request to DB to delete user(s) on query `filte`
+	Returns if request succeeded or failed
+	"""
+	payload = {"collection": "users", "action": 2, "filte": filte}
+	res = requests.post(url_db_write, data=dumps(payload), headers=headers).ok
+	logger.info(f"DB delete_users {filte} -> {res}")
+	return res
 
 
-def delete_rides(filte: dict):
-	url = f"{base_url_rides}/db/write"
-	payload = {"action": 2, "filter": filte}
-	return requests.post(url, data=dumps(payload), headers=headers).ok
+def delete_rides(filte: dict) -> bool:
+	"""
+	Helper function to send request to DB to find ride(s) on query `filte`
+	Returns if request succeeded or failed
+	"""
+	payload = {"collection": "rides", "action": 2, "filte": filte}
+	res = requests.post(url_db_write, data=dumps(payload), headers=headers).ok
+	logger.info(f"DB delete_rides {filte} -> {res}")
+	return res
+
+
+class Home(Resource):
+	def get(self):
+		return {'message': 'Ok. Users Running'}, 200
+
+
+class RequestCount(Resource):
+	def get(self):
+		"""
+		summary: endpoint to obtain the request count on any of the ride APIs
+		path: /api/v1/_count
+		method: get
+		responses:
+			200:
+				description: OK
+				content: application/json
+				type: array
+				items:
+					type: integer
+		"""
+		return [int(r.get(redis_key) or 0)], 200
+
+	def delete(self):
+		"""
+		summary: endpoint to reset the request count on any of the ride APIs
+		path: /api/v1/_count
+		method: delete
+		responses:
+			200: OK
+		"""
+		r.delete(redis_key)
+		return {}, 200
 
 
 class Users(Resource):
 	def put(self):
-		logger.info(request.get_json())
+		"""
+		summary: endpoint for inserting a user
+		path: /api/v1/users
+		method: put
+		requestBody:
+			content: application/json
+			type: object
+			requestBody:
+        content: application/json
+				type: object
+				properties:
+					username:
+						type: string
+					password:
+						type: string
+						description: SHA1 encrypted password
+			required:
+				- username
+				- password
+		responses:
+			201: User Created
+			400: Bad Request. Username exists or invalid password
+		"""
+		logger.debug(request.get_json())
+		# Fetch request body into a dict-like object
 		args = parser.parse_args()
 		username, password = args["username"], args["password"]
 
+		# Bad Request if password is invalid
 		if not is_valid_sha(password):
 			return {}, 400
 
+		# Bad request if username already exists
 		query = {"username": username}
 		if find_users(query):
 			return {}, 400
@@ -164,6 +185,23 @@ class Users(Resource):
 		return {}, 201
 
 	def get(self):
+		"""
+		summary: endpoint for fetching all username
+		path: /api/v1/users
+		method: get
+		responses:
+			200:
+				description: OK
+				content: application/json
+				type: array
+				items:
+					type: object
+					properties:
+						username:
+							type: string
+			204:
+				description: No Users
+		"""
 		r = [user["username"] for user in find_users({})]
 
 		return r, 200 if r else 204
@@ -171,29 +209,42 @@ class Users(Resource):
 
 class User(Resource):
 	def delete(self, username):
-
+		"""
+		summary: endpoint for deleting user with `username`
+		path: /api/v1/users
+		method: delete
+		parameters:
+			type: string
+			name: username
+			in: path
+			required: true
+		responses:
+			200: OK
+			400: Bad Request. User does not exist
+		"""
+		# Bad Request if user does not exist
 		query = {"username": username}
 		if not find_users(query):
 			return {}, 400
 
 		delete_users(query)
 
+		# Delete rides created by user
 		query = {"created_by": username}
 		delete_rides(query)
 
+		# Remove users from rides they have joined
 		query = {"users": username}
 		update_rides(query, {"$pull": query})
 
 		return {}, 200
 
 
+api.add_resource(Home, "/")
+api.add_resource(RequestCount, f"{url_prefix}/_count")
 api.add_resource(Users, f"{url_prefix}/users")
 api.add_resource(User, f"{url_prefix}/users/<string:username>")
-api.add_resource(DBWrite, f"{url_prefix}/db/write")
-api.add_resource(DBRead, f"{url_prefix}/db/read")
-api.add_resource(DBClear, f"{url_prefix}/db/clear")
-api.add_resource(RequestsDB, f"{url_prefix}/_count")
 
 
 if __name__ == "__main__":
-	app.run(port=port_users, host="0.0.0.0", debug=True)
+	app.run(port=flask_port, host="0.0.0.0", debug=True)
