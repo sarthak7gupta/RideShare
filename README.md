@@ -1,5 +1,24 @@
 # RideShare
 
+## A Project in Cloud Computing (UE17CS352)
+
+- @sarthak7gupta
+- @devbhartra
+- @dhruvvvx17
+
+We have created the backend for a mock cloud-based ​RideShare ​application​,​ that can be used to pool rides. Using this, the user can add themselves,delete a user, create a new ride, search for rides, join existing rides, and delete rides
+
+### Technologies Used-
+- AWS
+- Python
+- Flask
+- MongoDB
+- Docker
+- RabbitMQ
+- Redis
+- Nginx
+- Gunicorn
+
 ## Instructions to run-
 - Launch 3 t2.micro instances on AWS EC2, 1 each for rides, users and dbaas, with atleast 12 GBs each of storage
 - Expose Port 80 of all the instances using EC2 Security Groups
